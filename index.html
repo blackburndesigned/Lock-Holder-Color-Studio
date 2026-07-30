@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>Color Composer</title>
+  <style>
+    :root {
+      --bg: #f0f0f0;
+      --panel: #ffffff;
+      --text: #1a1a1a;
+      --muted: #666;
+      --accent: #3b82f6;
+      --preview-bg: #d0d0d0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--panel);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #ddd;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .mode-toggle {
+      display: flex;
+      gap: 6px;
+      background: #eee;
+      border-radius: 8px;
+      padding: 3px;
+    }
+
+    .mode-toggle button {
+      border: none;
+      background: transparent;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .mode-toggle button.active {
+      background: white;
+      color: var(--text);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      gap: 12px;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .preview-wrap {
+      background: var(--preview-bg);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 280px;
+      max-height: 55vh;
+    }
+
+    #preview {
+      max-width: 100%;
+      max-height: 55vh;
+      display: block;
+    }
+
+    .controls {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .control-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      background: white;
+      appearance: none;
+    }
+
+    .advanced-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .part-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .part-row span {
+      font-size: 14px;
+      font-weight: 500;
+      min-width: 110px;
+    }
+
+    .part-row select {
+      flex: 1;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .actions button {
+      flex: 1;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #e5e5e5;
+      color: var(--text);
+    }
+
+    .hidden { display: none !important; }
+
+    @media (min-width: 700px) {
+      main {
+        flex-direction: row;
+        align-items: flex-start;
+      }
+      .preview-wrap {
+        flex: 1.3;
+        min-height: 420px;
+        max-height: 70vh;
+      }
+      .controls {
+        flex: 0.9;
+        max-width: 340px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Color Composer</h1>
+    <div class="mode-toggle">
+      <button id="btn-simple" class="active">Simple</button>
+      <button id="btn-advanced">Advanced</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="preview-wrap">
+      <canvas id="preview"></canvas>
+    </div>
+
+    <div class="controls">
+      <!-- Simple Mode -->
+      <div id="simple-controls">
+        <div class="control-group">
+          <label>Primary</label>
+          <select id="primary-color"></select>
+        </div>
+        <div class="control-group">
+          <label>Secondary</label>
+          <select id="secondary-color"></select>
+        </div>
+      </div>
+
+      <!-- Advanced Mode -->
+      <div id="advanced-controls" class="advanced-list hidden"></div>
+
+      <div class="actions">
+        <button class="btn-primary" id="save-btn">Save Image</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ========== CONFIG ==========
+    const LAYER_ORDER = [
+      "skirt", "keyfob", "nameplate", "name_text", "rear_arm_02", "hoop_02",
+      "pocket_clip_01", "hoop_01", "frame_06", "frame_05", "frame_04",
+      "rear_plate_03", "frame_03", "rear_plate_02", "rear_plate_01",
+      "front_plate_03", "front_plate_02", "front_plate_01", "frame_02",
+      "frame_01", "rear_arm_01", "front_arm_01"
+    ];
+
+    const PRIMARY_PARTS = ["Front Arm", "Rear Arm", "Frame", "Hoop", "Keyfob", "Name Text", "Skirt"];
+    const SECONDARY_PARTS = ["Front Plate", "Rear Plate", "Pocket Clip", "Nameplate"];
+
+    const PART_GROUPS = {
+      "Front Arm":   ["front_arm"],
+      "Rear Arm":    ["rear_arm"],
+      "Frame":       ["frame"],
+      "Front Plate": ["front_plate"],
+      "Rear Plate":  ["rear_plate"],
+      "Hoop":        ["hoop"],
+      "Pocket Clip": ["pocket_clip"],
+      "Name Text":   ["name_text"],
+      "Nameplate":   ["nameplate"],
+      "Keyfob":      ["keyfob"],
+      "Skirt":       ["skirt"]
+    };
+
+    const COLORS = {
+      "Black":  [30, 30, 30],
+      "Orange": [255, 120, 0],
+      "Blue":   [30, 90, 200],
+      "Green":  [40, 160, 70],
+      "Red":    [200, 40, 40],
+      "Yellow": [240, 200, 30],
+      "Pink":   [230, 100, 160],
+      "White":  [240, 240, 240]
+    };
+
+    // ========== STATE ==========
+    let mode = "simple";
+    let images = {};
+    let primaryColor = "White";
+    let secondaryColor = "Black";
+    let advancedColors = {};
+    Object.keys(PART_GROUPS).forEach(p => advancedColors[p] = "White");
+
+    // ========== INIT ==========
+    const primarySelect = document.getElementById("primary-color");
+    const secondarySelect = document.getElementById("secondary-color");
+    const advancedContainer = document.getElementById("advanced-controls");
+    const canvas = document.getElementById("preview");
+    const ctx = canvas.getContext("2d");
+
+    function populateSelect(select) {
+      select.innerHTML = "";
+      Object.keys(COLORS).forEach(name => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+      });
+    }
+
+    populateSelect(primarySelect);
+    populateSelect(secondarySelect);
+    primarySelect.value = primaryColor;
+    secondarySelect.value = secondaryColor;
+
+    // Build advanced controls
+    Object.keys(PART_GROUPS).forEach(part => {
+      const row = document.createElement("div");
+      row.className = "part-row";
+      row.innerHTML = `<span>${part}</span>`;
+      const sel = document.createElement("select");
+      populateSelect(sel);
+      sel.value = "White";
+      sel.dataset.part = part;
+      sel.addEventListener("change", () => {
+        advancedColors[part] = sel.value;
+        render();
+      });
+      row.appendChild(sel);
+      advancedContainer.appendChild(row);
+    });
+
+    // Mode switching
+    document.getElementById("btn-simple").addEventListener("click", () => setMode("simple"));
+    document.getElementById("btn-advanced").addEventListener("click", () => setMode("advanced"));
+
+    function setMode(m) {
+      mode = m;
+      document.getElementById("btn-simple").classList.toggle("active", m === "simple");
+      document.getElementById("btn-advanced").classList.toggle("active", m === "advanced");
+      document.getElementById("simple-controls").classList.toggle("hidden", m !== "simple");
+      document.getElementById("advanced-controls").classList.toggle("hidden", m !== "advanced");
+      render();
+    }
+
+    primarySelect.addEventListener("change", () => {
+      primaryColor = primarySelect.value;
+      render();
+    });
+    secondarySelect.addEventListener("change", () => {
+      secondaryColor = secondarySelect.value;
+      render();
+    });
+
+    document.getElementById("save-btn").addEventListener("click", () => {
+  const dataUrl = canvas.toDataURL("image/png");
+
+  // Detect iOS / iPhone / iPad
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  if (isIOS) {
+    // On iPhone: open the image in a new tab so user can long-press → Save Image
+    const win = window.open();
+    if (win) {
+      win.document.write(`
+        <html>
+          <head>
+            <title>Color Composer</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body { margin: 0; background: #111; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+              img { max-width: 100%; height: auto; }
+              p { color: #aaa; font-family: -apple-system, sans-serif; text-align: center; padding: 12px; }
+            </style>
+          </head>
+          <body>
+            <div>
+              <img src="${dataUrl}" alt="Color Composer result" />
+              <p>Long-press the image → Add to Photos</p>
+            </div>
+          </body>
+        </html>
+      `);
+    } else {
+      alert("Please allow pop-ups to save the image, then long-press it to save.");
+    }
+  } else {
+    // On Mac / desktop: normal download
+    const link = document.createElement("a");
+    link.download = "color-composer.png";
+    link.href = dataUrl;
+    link.click();
+  }
+    });
+
+    // ========== IMAGE LOADING & RENDERING ==========
+    function loadImage(name) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = `parts/${name}.png`;
+      });
+    }
+
+    async function loadAllImages() {
+      const promises = LAYER_ORDER.map(async name => {
+        try {
+          images[name] = await loadImage(name);
+        } catch {
+          console.warn("Missing:", name);
+        }
+      });
+      await Promise.all(promises);
+      render();
+    }
+
+    function getColorForLayer(layerName) {
+      for (const [partName, prefixes] of Object.entries(PART_GROUPS)) {
+        if (prefixes.some(p => layerName.startsWith(p))) {
+          if (mode === "simple") {
+            return PRIMARY_PARTS.includes(partName)
+              ? COLORS[primaryColor]
+              : COLORS[secondaryColor];
+          } else {
+            return COLORS[advancedColors[partName]];
+          }
+        }
+      }
+      return [240, 240, 240];
+    }
+
+    function tintImage(img, rgb) {
+      const off = document.createElement("canvas");
+      off.width = img.width;
+      off.height = img.height;
+      const octx = off.getContext("2d");
+
+      // Draw original
+      octx.drawImage(img, 0, 0);
+
+      // Get pixel data
+      const imageData = octx.getImageData(0, 0, off.width, off.height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a === 0) continue;
+
+        // Use luminance of original to modulate the tint
+        const lum = (data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11) / 255;
+        data[i]     = rgb[0] * lum;
+        data[i + 1] = rgb[1] * lum;
+        data[i + 2] = rgb[2] * lum;
+      }
+
+      octx.putImageData(imageData, 0, 0);
+      return off;
+    }
+
+    function render() {
+      // Find max size
+      let w = 0, h = 0;
+      LAYER_ORDER.forEach(name => {
+        if (images[name]) {
+          w = Math.max(w, images[name].width);
+          h = Math.max(h, images[name].height);
+        }
+      });
+      if (!w || !h) return;
+
+      canvas.width = w;
+      canvas.height = h;
+      ctx.clearRect(0, 0, w, h);
+
+      LAYER_ORDER.forEach(name => {
+        const img = images[name];
+        if (!img) return;
+        const rgb = getColorForLayer(name);
+        const tinted = tintImage(img, rgb);
+        ctx.drawImage(tinted, 0, 0);
+      });
+    }
+
+    loadAllImages();
+  </script>
+</body>
+</html>
