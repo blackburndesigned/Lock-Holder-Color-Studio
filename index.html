@@ -114,7 +114,7 @@
       color: var(--muted);
     }
 
-    select {
+    select, input[type="text"], input[type="number"] {
       width: 100%;
       padding: 10px 12px;
       font-size: 16px;
@@ -207,6 +207,19 @@
     </div>
 
     <div class="controls">
+      <div class="control-group">
+        <label>Customer / name *</label>
+        <input type="text" id="customer-name" placeholder="e.g. Jason S." />
+      </div>
+      <div class="control-group">
+        <label>Quantity</label>
+        <input type="number" id="quantity" min="1" step="1" value="1" />
+      </div>
+      <div class="control-group">
+        <label>Notes</label>
+        <input type="text" id="order-notes" placeholder="Optional" />
+      </div>
+
       <!-- Simple Mode -->
       <div id="simple-controls">
         <div class="control-group">
@@ -225,6 +238,13 @@
       <div class="actions">
         <button class="btn-primary" id="save-btn">Save Image</button>
       </div>
+      <div class="actions">
+        <button class="btn-secondary" id="export-order-btn">Download Order JSON</button>
+      </div>
+      <div class="actions">
+        <button class="btn-secondary" id="submit-order-btn">Submit to Supabase</button>
+      </div>
+      <p id="order-status" style="font-size:12px;color:var(--muted);margin-top:4px;"></p>
     </div>
   </main>
 
@@ -465,6 +485,118 @@
         ctx.drawImage(tinted, 0, 0);
       });
     }
+
+    // ========== ORDER EXPORT / SUPABASE ==========
+    const PRIMARY_SET = new Set(PRIMARY_PARTS);
+
+    function buildOrderPayload() {
+      const customer = (document.getElementById("customer-name").value || "").trim();
+      if (!customer) {
+        throw new Error("Customer / name is required");
+      }
+      let quantity = parseInt(document.getElementById("quantity").value, 10);
+      if (!Number.isFinite(quantity) || quantity < 1) quantity = 1;
+      const notes = document.getElementById("order-notes").value || "";
+
+      const parts = {};
+      Object.keys(PART_GROUPS).forEach(part => {
+        if (mode === "simple") {
+          parts[part] = PRIMARY_SET.has(part) ? primaryColor : secondaryColor;
+        } else {
+          parts[part] = advancedColors[part] || "White";
+        }
+      });
+
+      return {
+        format: "color-composer-order",
+        version: 1,
+        id: (crypto.randomUUID && crypto.randomUUID()) ||
+            ("cc-" + Date.now() + "-" + Math.random().toString(16).slice(2)),
+        source: "color-composer",
+        customer_name: customer,
+        quantity,
+        mode,
+        primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        parts,
+        notes,
+        created_at: new Date().toISOString(),
+      };
+    }
+
+    function setOrderStatus(msg) {
+      const el = document.getElementById("order-status");
+      if (el) el.textContent = msg || "";
+    }
+
+    document.getElementById("export-order-btn").addEventListener("click", () => {
+      try {
+        const payload = buildOrderPayload();
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+          type: "application/json",
+        });
+        const link = document.createElement("a");
+        const safe = payload.customer_name.replace(/[^\w\-]+/g, "_").slice(0, 40);
+        link.download = `order_${safe}_${payload.id.slice(0, 8)}.json`;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+        URL.revokeObjectURL(link.href);
+        setOrderStatus("Order JSON downloaded — import with Production Tracker → Import CC");
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    });
+
+    document.getElementById("submit-order-btn").addEventListener("click", async () => {
+      try {
+        const payload = buildOrderPayload();
+        const url = (localStorage.getItem("cc_supabase_url") || "").trim();
+        const key = (localStorage.getItem("cc_supabase_anon_key") || "").trim();
+        if (!url || !key) {
+          const u = prompt("Supabase project URL (https://xxx.supabase.co):", url);
+          const k = prompt("Supabase anon key:", key);
+          if (!u || !k) {
+            setOrderStatus("Supabase URL/key not set. Use Download Order JSON instead.");
+            return;
+          }
+          localStorage.setItem("cc_supabase_url", u.trim());
+          localStorage.setItem("cc_supabase_anon_key", k.trim());
+        }
+        const base = (localStorage.getItem("cc_supabase_url") || "").replace(/\/$/, "");
+        const anon = localStorage.getItem("cc_supabase_anon_key") || "";
+        const row = {
+          id: payload.id,
+          customer_name: payload.customer_name,
+          quantity: payload.quantity,
+          mode: payload.mode,
+          primary_color: payload.primary_color,
+          secondary_color: payload.secondary_color,
+          parts: payload.parts,
+          notes: payload.notes,
+          source: "color-composer",
+          created_at: payload.created_at,
+        };
+        setOrderStatus("Submitting…");
+        const resp = await fetch(`${base}/rest/v1/color_composer_orders`, {
+          method: "POST",
+          headers: {
+            apikey: anon,
+            Authorization: `Bearer ${anon}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify(row),
+        });
+        if (!resp.ok) {
+          const t = await resp.text();
+          throw new Error(`Supabase ${resp.status}: ${t.slice(0, 200)}`);
+        }
+        setOrderStatus("Submitted to Supabase. Sync from Production Tracker when ready.");
+      } catch (e) {
+        alert(e.message || String(e));
+        setOrderStatus(e.message || "Submit failed");
+      }
+    });
 
     loadAllImages();
   </script>
