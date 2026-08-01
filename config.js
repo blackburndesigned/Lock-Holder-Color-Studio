@@ -3,7 +3,7 @@
  * Anon key: Supabase → Project Settings → API → anon public
  */
 window.CC_CONFIG = {
-  supabaseUrl: "https://njesvsdhndtthbsctmkp.supabase.co",
-  supabaseAnonKey: "",
+  supabaseUrl: "https://YOUR_PROJECT.supabase.co",
+  supabaseAnonKey: "eyJ...your_anon_key...",
   showShopTools: false,
 };
