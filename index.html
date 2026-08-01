@@ -236,18 +236,24 @@
       <div id="advanced-controls" class="advanced-list hidden"></div>
 
       <div class="actions">
-        <button class="btn-primary" id="save-btn">Save Image</button>
+        <button class="btn-primary" id="submit-order-btn">Submit Order</button>
       </div>
-      <div class="actions">
-        <button class="btn-secondary" id="export-order-btn">Download Order JSON</button>
-      </div>
-      <div class="actions">
-        <button class="btn-secondary" id="submit-order-btn">Submit to Supabase</button>
+      <div class="actions" id="cancel-order-wrap" style="display:none;">
+        <button class="btn-secondary" id="cancel-order-btn" type="button">Cancel last order</button>
       </div>
       <p id="order-status" style="font-size:12px;color:var(--muted);margin-top:4px;"></p>
+      <div class="actions" style="margin-top:8px;">
+        <button class="btn-secondary" id="save-btn">Save Image</button>
+      </div>
+      <div class="actions shop-only" id="shop-tools" style="display:none;">
+        <button class="btn-secondary" id="export-order-btn">Download Order JSON</button>
+      </div>
     </div>
   </main>
 
+  <!-- Hosted deploy: copy config.example.js → config.js and fill URL + anon key.
+       Customers never type keys. Optional ?shop=1 shows Download JSON for staff. -->
+  <script src="config.js"></script>
   <script>
     // ========== CONFIG ==========
     const LAYER_ORDER = [
@@ -488,6 +494,15 @@
 
     // ========== ORDER EXPORT / SUPABASE ==========
     const PRIMARY_SET = new Set(PRIMARY_PARTS);
+    const LAST_ORDER_KEY = "cc_last_submitted_order_id";
+
+    /** Hosted config.js sets window.CC_CONFIG = { supabaseUrl, supabaseAnonKey }. */
+    function getSupabaseConfig() {
+      const cfg = window.CC_CONFIG || {};
+      const url = (cfg.supabaseUrl || cfg.SUPABASE_URL || "").trim().replace(/\/$/, "");
+      const key = (cfg.supabaseAnonKey || cfg.SUPABASE_ANON_KEY || "").trim();
+      return { url, key };
+    }
 
     function buildOrderPayload() {
       const customer = (document.getElementById("customer-name").value || "").trim();
@@ -529,41 +544,59 @@
       if (el) el.textContent = msg || "";
     }
 
-    document.getElementById("export-order-btn").addEventListener("click", () => {
-      try {
-        const payload = buildOrderPayload();
-        const blob = new Blob([JSON.stringify(payload, null, 2)], {
-          type: "application/json",
-        });
-        const link = document.createElement("a");
-        const safe = payload.customer_name.replace(/[^\w\-]+/g, "_").slice(0, 40);
-        link.download = `order_${safe}_${payload.id.slice(0, 8)}.json`;
-        link.href = URL.createObjectURL(blob);
-        link.click();
-        URL.revokeObjectURL(link.href);
-        setOrderStatus("Order JSON downloaded — import with Production Tracker → Import CC");
-      } catch (e) {
-        alert(e.message || String(e));
-      }
-    });
+    function showCancelButton(show) {
+      const wrap = document.getElementById("cancel-order-wrap");
+      if (wrap) wrap.style.display = show ? "flex" : "none";
+    }
+
+    function refreshCancelVisibility() {
+      const id = sessionStorage.getItem(LAST_ORDER_KEY);
+      showCancelButton(!!id);
+    }
+
+    // Staff tools: ?shop=1 or config.showShopTools
+    (function initShopTools() {
+      const params = new URLSearchParams(location.search);
+      const shop =
+        params.get("shop") === "1" ||
+        !!(window.CC_CONFIG && window.CC_CONFIG.showShopTools);
+      const el = document.getElementById("shop-tools");
+      if (el) el.style.display = shop ? "flex" : "none";
+    })();
+
+    const exportBtn = document.getElementById("export-order-btn");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        try {
+          const payload = buildOrderPayload();
+          const blob = new Blob([JSON.stringify(payload, null, 2)], {
+            type: "application/json",
+          });
+          const link = document.createElement("a");
+          const safe = payload.customer_name.replace(/[^\w\-]+/g, "_").slice(0, 40);
+          link.download = `order_${safe}_${payload.id.slice(0, 8)}.json`;
+          link.href = URL.createObjectURL(blob);
+          link.click();
+          URL.revokeObjectURL(link.href);
+          setOrderStatus("Order JSON downloaded — import with Parts to Print → Import CC");
+        } catch (e) {
+          alert(e.message || String(e));
+        }
+      });
+    }
 
     document.getElementById("submit-order-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("submit-order-btn");
       try {
         const payload = buildOrderPayload();
-        const url = (localStorage.getItem("cc_supabase_url") || "").trim();
-        const key = (localStorage.getItem("cc_supabase_anon_key") || "").trim();
-        if (!url || !key) {
-          const u = prompt("Supabase project URL (https://xxx.supabase.co):", url);
-          const k = prompt("Supabase anon key:", key);
-          if (!u || !k) {
-            setOrderStatus("Supabase URL/key not set. Use Download Order JSON instead.");
-            return;
-          }
-          localStorage.setItem("cc_supabase_url", u.trim());
-          localStorage.setItem("cc_supabase_anon_key", k.trim());
+        const { url: base, key: anon } = getSupabaseConfig();
+        if (!base || !anon) {
+          setOrderStatus(
+            "Order submit is not configured. The shop must host this page with config.js " +
+              "(see config.example.js). Staff can use ?shop=1 and Download Order JSON."
+          );
+          return;
         }
-        const base = (localStorage.getItem("cc_supabase_url") || "").replace(/\/$/, "");
-        const anon = localStorage.getItem("cc_supabase_anon_key") || "";
         const row = {
           id: payload.id,
           customer_name: payload.customer_name,
@@ -576,6 +609,7 @@
           source: "color-composer",
           created_at: payload.created_at,
         };
+        btn.disabled = true;
         setOrderStatus("Submitting…");
         const resp = await fetch(`${base}/rest/v1/color_composer_orders`, {
           method: "POST",
@@ -589,15 +623,67 @@
         });
         if (!resp.ok) {
           const t = await resp.text();
-          throw new Error(`Supabase ${resp.status}: ${t.slice(0, 200)}`);
+          throw new Error(`Submit failed (${resp.status}): ${t.slice(0, 200)}`);
         }
-        setOrderStatus("Submitted to Supabase. Sync from Production Tracker when ready.");
+        sessionStorage.setItem(LAST_ORDER_KEY, payload.id);
+        refreshCancelVisibility();
+        setOrderStatus(
+          "Order submitted — thank you! You can cancel it below until the shop starts it."
+        );
       } catch (e) {
         alert(e.message || String(e));
         setOrderStatus(e.message || "Submit failed");
+      } finally {
+        btn.disabled = false;
       }
     });
 
+    document.getElementById("cancel-order-btn").addEventListener("click", async () => {
+      const id = sessionStorage.getItem(LAST_ORDER_KEY);
+      if (!id) {
+        setOrderStatus("No recent order to cancel in this browser session.");
+        return;
+      }
+      if (!confirm("Cancel your last submitted order? Only works if the shop has not imported it yet.")) {
+        return;
+      }
+      const { url: base, key: anon } = getSupabaseConfig();
+      if (!base || !anon) {
+        setOrderStatus("Cancel is not available (submit not configured).");
+        return;
+      }
+      try {
+        setOrderStatus("Cancelling…");
+        // Mark cancelled so Parts to Print will not import it.
+        const resp = await fetch(
+          `${base}/rest/v1/color_composer_orders?id=eq.${encodeURIComponent(id)}&imported_at=is.null`,
+          {
+            method: "PATCH",
+            headers: {
+              apikey: anon,
+              Authorization: `Bearer ${anon}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({ cancelled_at: new Date().toISOString() }),
+          }
+        );
+        if (!resp.ok) {
+          const t = await resp.text();
+          throw new Error(
+            `Cancel failed (${resp.status}). If the shop already imported it, contact them to remove it. ${t.slice(0, 120)}`
+          );
+        }
+        sessionStorage.removeItem(LAST_ORDER_KEY);
+        refreshCancelVisibility();
+        setOrderStatus("Order cancelled. It will not be imported by the shop.");
+      } catch (e) {
+        alert(e.message || String(e));
+        setOrderStatus(e.message || "Cancel failed");
+      }
+    });
+
+    refreshCancelVisibility();
     loadAllImages();
   </script>
 </body>
